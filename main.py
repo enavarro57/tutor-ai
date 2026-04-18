@@ -1,17 +1,21 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import HistorialInteraccion, ProgresoTema
-from openai import OpenAI
 import os
-import json
-import re
 
-# --------- CONFIG IA ---------
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from sqlalchemy.orm import Session
+
+from database import engine, SessionLocal, Base
+import models
+
+from openai import OpenAI
+
+# 🔥 Crear tablas automáticamente
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+# 🔑 OpenAI
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 # --------- MODELO ---------
