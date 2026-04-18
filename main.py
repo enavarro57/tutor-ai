@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import engine, SessionLocal, Base
 import models
+from models import ProgresoTema
 
 from openai import OpenAI
 
