@@ -1,5 +1,5 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import FastAPI
+from pydantic import BaseModel
 import os
 import re
 import json
@@ -8,16 +8,16 @@ from sqlalchemy.orm import Session
 
 from database import engine, SessionLocal, Base
 import models
-from models import ProgresoTema, HistorialInteraccion
+from models import ProgresoTema
 
 from openai import OpenAI
 
-# Crear tablas automáticamente
+# 🔥 Crear tablas automáticamente
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# OpenAI
+# 🔑 OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
@@ -29,8 +29,8 @@ class TutorRequest(BaseModel):
     edad: int
     nivel: str
     tema: str
-    historial: list = Field(default_factory=list)
-    dificultades: list = Field(default_factory=list)
+    historial: list = []
+    dificultades: list = []
 
 
 # --------- ROOT ---------
@@ -80,7 +80,7 @@ Ejemplo:
         temperature=0.7
     )
 
-    texto = response.choices[0].message.content or ""
+    texto = response.choices[0].message.content
 
     match = re.search(r"\{.*\}", texto, re.DOTALL)
     if match:
@@ -92,7 +92,7 @@ Ejemplo:
         }
 
 
-# --------- IA: EXPLICACIÓN ---------
+# --------- IA: EXPLICACIÓN (CORREGIDA) ---------
 def generar_explicacion_ia(ejercicio, respuesta_alumno, respuesta_correcta, nivel):
     prompt = f"""
 Eres un profesor de matemáticas para niños.
@@ -217,7 +217,7 @@ def tutor(request: TutorRequest):
 
             progreso.nivel = nivel_detectado
 
-            # --------- IA EXPLICACIÓN ---------
+            # --------- IA EXPLICACIÓN (CORRECTA) ---------
             explicacion = generar_explicacion_ia(
                 ejercicio,
                 respuesta_alumno,
@@ -243,7 +243,6 @@ def tutor(request: TutorRequest):
 
         db.add(historial)
         db.commit()
-        db.refresh(historial)
 
         return {
             "explicacion": explicacion,
@@ -261,10 +260,6 @@ def tutor(request: TutorRequest):
                 "Repite ejercicios similares."
             ]
         }
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
 
     finally:
         db.close()
