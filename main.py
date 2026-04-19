@@ -42,7 +42,20 @@ def root():
 
 
 def normalizar_respuesta(texto: str) -> str:
-    return texto.strip().lower().replace(",", ".")
+    if not texto:
+        return ""
+
+    texto = texto.strip().lower().replace(",", ".").replace(" ", "")
+
+    # Si es fracción tipo 3/8
+    if "/" in texto:
+        try:
+            num, den = texto.split("/")
+            return str(float(num) / float(den))
+        except:
+            return texto
+
+    return texto
 
 
 def generar_ejercicio_ia(tema, nivel, edad, dificultades):
