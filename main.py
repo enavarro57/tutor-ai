@@ -31,6 +31,11 @@ class TutorRequest(BaseModel):
 
 
 @app.get("/")
+@app.get("/reset-db")
+def reset_db():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    return {"status": "database reset"}
 def root():
     return {"status": "ok"}
 
