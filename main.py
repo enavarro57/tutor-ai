@@ -12,16 +12,13 @@ from models import ProgresoTema, HistorialInteraccion
 
 from openai import OpenAI
 
-# Crear tablas automáticamente
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-# --------- MODELO ---------
 class TutorRequest(BaseModel):
     alumno_id: str
     pregunta: str
@@ -33,18 +30,15 @@ class TutorRequest(BaseModel):
     dificultades: list = Field(default_factory=list)
 
 
-# --------- ROOT ---------
 @app.get("/")
 def root():
     return {"status": "ok"}
 
 
-# --------- NORMALIZAR RESPUESTA ---------
 def normalizar_respuesta(texto: str) -> str:
     return texto.strip().lower().replace(",", ".")
 
 
-# --------- IA: GENERAR EJERCICIO ---------
 def generar_ejercicio_ia(tema, nivel, edad, dificultades):
     prompt = f"""
 Eres un profesor de matemáticas para niños.
@@ -92,7 +86,6 @@ Ejemplo:
         }
 
 
-# --------- IA: EXPLICACIÓN ---------
 def generar_explicacion_ia(ejercicio, respuesta_alumno, respuesta_correcta, nivel):
     prompt = f"""
 Eres un profesor de matemáticas para niños.
@@ -128,7 +121,6 @@ IMPORTANTE:
     return response.choices[0].message.content
 
 
-# --------- ENDPOINT PRINCIPAL ---------
 @app.post("/tutor")
 def tutor(request: TutorRequest):
     db: Session = SessionLocal()
@@ -140,7 +132,6 @@ def tutor(request: TutorRequest):
         nivel_inicial = request.nivel
         tema = request.tema
 
-        # --------- LEER PROGRESO ---------
         progreso = db.query(ProgresoTema).filter_by(
             alumno_id=alumno_id,
             tema=tema
@@ -157,95 +148,153 @@ def tutor(request: TutorRequest):
         else:
             nivel_detectado = nivel_inicial
 
-        # --------- GENERAR EJERCICIO ---------
-        ejercicio_data = generar_ejercicio_ia(
-            tema,
-            nivel_detectado,
-            request.edad,
-            request.dificultades
-        )
-
-        ejercicio = ejercicio_data["ejercicio"]
-        respuesta_correcta = ejercicio_data["respuesta_correcta"]
-
         es_correcta = None
         feedback = ""
         explicacion = ""
+        siguiente_paso = ""
+        ejercicio = ""
+        respuesta_correcta = None
 
-        # --------- SIN RESPUESTA ---------
+        # CASO 1: GENERAR NUEVO EJERCICIO
         if not respuesta_alumno:
+            ejercicio_data = generar_ejercicio_ia(
+                tema,
+                nivel_detectado,
+                request.edad,
+                request.dificultades
+            )
+
+            ejercicio = ejercicio_data["ejercicio"]
+            respuesta_correcta = ejercicio_data["respuesta_correcta"]
+
             explicacion = (
                 f"Vamos a trabajar el tema '{tema}' en nivel '{nivel_detectado}'. "
                 f"Resuelve este ejercicio: {ejercicio}"
             )
             siguiente_paso = "Envía tu respuesta en 'respuesta_alumno'."
 
-        # --------- CON RESPUESTA ---------
-        else:
-            respuesta_normalizada = normalizar_respuesta(respuesta_alumno)
-            correcta_normalizada = normalizar_respuesta(respuesta_correcta)
-
-            es_correcta = respuesta_normalizada == correcta_normalizada
-
-            # --------- ACTUALIZAR PROGRESO ---------
-            if progreso:
-                progreso.ejercicios_totales += 1
-                if es_correcta:
-                    progreso.ejercicios_correctos += 1
-            else:
-                progreso = ProgresoTema(
-                    alumno_id=alumno_id,
-                    tema=tema,
-                    nivel=nivel_detectado,
-                    porcentaje=0,
-                    ejercicios_correctos=1 if es_correcta else 0,
-                    ejercicios_totales=1
-                )
-                db.add(progreso)
-
-            progreso.porcentaje = int(
-                (progreso.ejercicios_correctos / progreso.ejercicios_totales) * 100
-            ) if progreso.ejercicios_totales > 0 else 0
-
-            # --------- REAJUSTAR NIVEL ---------
-            if progreso.porcentaje >= 80:
-                nivel_detectado = "intermedio"
-            elif progreso.porcentaje >= 50:
-                nivel_detectado = "básico"
-            else:
-                nivel_detectado = "refuerzo"
-
-            progreso.nivel = nivel_detectado
-
-            # --------- IA EXPLICACIÓN ---------
-            explicacion = generar_explicacion_ia(
-                ejercicio,
-                respuesta_alumno,
-                respuesta_correcta,
-                nivel_detectado
+            historial = HistorialInteraccion(
+                alumno_id=alumno_id,
+                mensaje_alumno=pregunta,
+                respuesta_ia=explicacion,
+                tema=tema,
+                nivel_detectado=nivel_detectado,
+                ejercicio_generado=ejercicio,
+                respuesta_correcta=respuesta_correcta,
+                respuesta_alumno=None,
+                corregido=False
             )
 
-            if es_correcta:
-                feedback = "¡Muy bien! Tu respuesta es correcta."
-                siguiente_paso = "Vamos con uno más difícil."
-            else:
-                feedback = "Vamos a corregirlo paso a paso."
-                siguiente_paso = "Intenta otro ejercicio de refuerzo."
+            db.add(historial)
+            db.commit()
+            db.refresh(historial)
 
-        # --------- GUARDAR HISTORIAL ---------
-        historial = HistorialInteraccion(
-            alumno_id=alumno_id,
-            mensaje_alumno=f"{pregunta} | respuesta_alumno: {respuesta_alumno}",
-            respuesta_ia=explicacion,
-            tema=tema,
-            nivel_detectado=nivel_detectado
+            return {
+                "historial_id": historial.id,
+                "explicacion": explicacion,
+                "ejercicio": ejercicio,
+                "respuesta_correcta": None,
+                "es_correcta": None,
+                "feedback": "",
+                "nivel_detectado": nivel_detectado,
+                "tema": tema,
+                "porcentaje_progreso": progreso.porcentaje if progreso else 0,
+                "siguiente_paso": siguiente_paso,
+                "recomendaciones": [
+                    "Practica con ejemplos pequeños.",
+                    "Usa dibujos para entender mejor.",
+                    "Repite ejercicios similares."
+                ]
+            }
+
+        # CASO 2: CORREGIR POR historial_id
+        if not request.historial_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Falta historial_id para corregir el ejercicio."
+            )
+
+        ejercicio_actual = (
+            db.query(HistorialInteraccion)
+            .filter_by(
+                id=request.historial_id,
+                alumno_id=alumno_id
+            )
+            .first()
         )
 
-        db.add(historial)
+        if not ejercicio_actual:
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontró el ejercicio asociado a ese historial_id."
+            )
+
+        if ejercicio_actual.corregido:
+            raise HTTPException(
+                status_code=400,
+                detail="Este ejercicio ya fue corregido."
+            )
+
+        ejercicio = ejercicio_actual.ejercicio_generado
+        respuesta_correcta = ejercicio_actual.respuesta_correcta
+
+        respuesta_normalizada = normalizar_respuesta(respuesta_alumno)
+        correcta_normalizada = normalizar_respuesta(respuesta_correcta)
+
+        es_correcta = respuesta_normalizada == correcta_normalizada
+
+        if progreso:
+            progreso.ejercicios_totales += 1
+            if es_correcta:
+                progreso.ejercicios_correctos += 1
+        else:
+            progreso = ProgresoTema(
+                alumno_id=alumno_id,
+                tema=tema,
+                nivel=nivel_detectado,
+                porcentaje=0,
+                ejercicios_correctos=1 if es_correcta else 0,
+                ejercicios_totales=1
+            )
+            db.add(progreso)
+
+        progreso.porcentaje = int(
+            (progreso.ejercicios_correctos / progreso.ejercicios_totales) * 100
+        ) if progreso.ejercicios_totales > 0 else 0
+
+        if progreso.porcentaje >= 80:
+            nivel_detectado = "intermedio"
+        elif progreso.porcentaje >= 50:
+            nivel_detectado = "básico"
+        else:
+            nivel_detectado = "refuerzo"
+
+        progreso.nivel = nivel_detectado
+
+        explicacion = generar_explicacion_ia(
+            ejercicio,
+            respuesta_alumno,
+            respuesta_correcta,
+            nivel_detectado
+        )
+
+        if es_correcta:
+            feedback = "¡Muy bien! Tu respuesta es correcta."
+            siguiente_paso = "Vamos con uno más difícil."
+        else:
+            feedback = "Vamos a corregirlo paso a paso."
+            siguiente_paso = "Intenta otro ejercicio de refuerzo."
+
+        ejercicio_actual.respuesta_alumno = respuesta_alumno
+        ejercicio_actual.respuesta_ia = explicacion
+        ejercicio_actual.nivel_detectado = nivel_detectado
+        ejercicio_actual.corregido = True
+
         db.commit()
-        db.refresh(historial)
+        db.refresh(ejercicio_actual)
 
         return {
+            "historial_id": ejercicio_actual.id,
             "explicacion": explicacion,
             "ejercicio": ejercicio,
             "respuesta_correcta": respuesta_correcta if es_correcta is False else None,
@@ -262,9 +311,11 @@ def tutor(request: TutorRequest):
             ]
         }
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
     finally:
         db.close()
