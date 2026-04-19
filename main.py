@@ -26,6 +26,7 @@ class TutorRequest(BaseModel):
     edad: int
     nivel: str
     tema: str
+    historial_id: int | None = None  # 👈 ESTA LÍNEA ES LA CLAVE
     historial: list = Field(default_factory=list)
     dificultades: list = Field(default_factory=list)
 
