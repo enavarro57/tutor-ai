@@ -175,7 +175,6 @@ def tutor(request: TutorRequest):
         nivel_inicial = request.nivel
         tema = request.tema
 
-        # Calcular edad automáticamente si hay fecha_nacimiento
         if request.fecha_nacimiento is not None:
             edad_alumno = calcular_edad(request.fecha_nacimiento)
         elif request.edad is not None:
@@ -192,7 +191,6 @@ def tutor(request: TutorRequest):
                 detail="La edad calculada no es válida."
             )
 
-        # Buscar o crear alumno usando codigo
         alumno = db.query(Alumno).filter_by(codigo=alumno_id).first()
 
         if alumno:
@@ -224,7 +222,6 @@ def tutor(request: TutorRequest):
         else:
             nivel_detectado = nivel_inicial
 
-        # CASO 1: GENERAR EJERCICIO
         if not respuesta_alumno:
             ejercicio_data = generar_ejercicio_ia(
                 tema,
@@ -261,7 +258,6 @@ def tutor(request: TutorRequest):
                 "edad_calculada": edad_alumno
             }
 
-        # CASO 2: CORREGIR
         if not request.historial_id:
             raise HTTPException(status_code=400, detail="Falta historial_id")
 
@@ -356,6 +352,48 @@ def obtener_alumno(codigo: str):
         db.close()
 
 
+@app.post("/alumnos", response_model=AlumnoResponse)
+def crear_alumno(request: AlumnoUpdate):
+    db: Session = SessionLocal()
+    try:
+        existente = db.query(Alumno).filter_by(codigo=request.codigo).first()
+        if existente:
+            raise HTTPException(
+                status_code=400,
+                detail="Ya existe un alumno con ese código"
+            )
+
+        edad_final = request.edad
+        if request.fecha_nacimiento is not None:
+            edad_final = calcular_edad(request.fecha_nacimiento)
+
+        alumno = Alumno(
+            codigo=request.codigo,
+            nombre=request.nombre,
+            edad=edad_final,
+            fecha_nacimiento=request.fecha_nacimiento,
+            email=request.email,
+            puntos_disponibles=request.puntos_disponibles,
+            puntos_ganados_total=request.puntos_ganados_total,
+            puntos_gastados_total=request.puntos_gastados_total,
+        )
+
+        db.add(alumno)
+        db.commit()
+        db.refresh(alumno)
+
+        return alumno
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
 @app.put("/alumnos/{codigo}", response_model=AlumnoResponse)
 def actualizar_alumno(codigo: str, request: AlumnoUpdate):
     db: Session = SessionLocal()
@@ -371,7 +409,6 @@ def actualizar_alumno(codigo: str, request: AlumnoUpdate):
                 detail="El código del alumno en la URL y en el body no coincide"
             )
 
-        # Si viene fecha_nacimiento, recalcular edad automáticamente
         edad_final = request.edad
         if request.fecha_nacimiento is not None:
             edad_final = calcular_edad(request.fecha_nacimiento)
