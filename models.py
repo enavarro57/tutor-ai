@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean
+from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, Boolean, Date
 from sqlalchemy.sql import func
 from database import Base
 
@@ -31,13 +31,15 @@ class ProgresoTema(Base):
     ejercicios_totales = Column(Integer, default=0)
     updated_at = Column(TIMESTAMP, server_default=func.now())
 
+
 class Alumno(Base):
     __tablename__ = "alumnos"
 
     id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String(100), unique=True)
+    codigo = Column(String(100), unique=True, nullable=False)
     nombre = Column(String(255))
     edad = Column(Integer)
+    fecha_nacimiento = Column(Date, nullable=True)
     email = Column(String(255))
     puntos_disponibles = Column(Integer, default=0)
     puntos_ganados_total = Column(Integer, default=0)
