@@ -44,7 +44,7 @@ class Alumno(Base):
     puntos_ganados_total = Column(Integer, default=0)
     puntos_gastados_total = Column(Integer, default=0)
     fecha_nacimiento = Column(Date, nullable=True)
-    created_at = Column(TIMESTAMP, server_default=func.now()))
+    created_at = Column(TIMESTAMP, server_default=func.now())
 
 
 class Subgrupo(Base):
