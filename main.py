@@ -9,7 +9,6 @@ import json
 from sqlalchemy.orm import Session
 
 from database import engine, SessionLocal, Base
-import models
 from models import ProgresoTema, HistorialInteraccion, Alumno
 
 from openai import OpenAI
@@ -20,6 +19,9 @@ app = FastAPI()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# =========================
+# SCHEMAS
+# =========================
 
 class TutorRequest(BaseModel):
     alumno_id: str
@@ -34,20 +36,6 @@ class TutorRequest(BaseModel):
     fecha_nacimiento: Optional[date] = None
 
 
-class AlumnoResponse(BaseModel):
-    codigo: str
-    nombre: Optional[str] = None
-    edad: Optional[int] = None
-    fecha_nacimiento: Optional[date] = None
-    email: Optional[str] = None
-    puntos_disponibles: int = 0
-    puntos_ganados_total: int = 0
-    puntos_gastados_total: int = 0
-
-    class Config:
-        from_attributes = True
-
-
 class AlumnoUpdate(BaseModel):
     codigo: str
     nombre: Optional[str] = None
@@ -59,17 +47,9 @@ class AlumnoUpdate(BaseModel):
     puntos_gastados_total: int = 0
 
 
-@app.get("/")
-def root():
-    return {"status": "ok"}
-
-
-@app.get("/reset-db")
-def reset_db():
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    return {"status": "database reset"}
-
+# =========================
+# UTILIDADES
+# =========================
 
 def calcular_edad(fecha_nacimiento: date) -> int:
     hoy = date.today()
@@ -94,6 +74,10 @@ def normalizar_respuesta(texto: str) -> str:
     return texto
 
 
+# =========================
+# IA
+# =========================
+
 def generar_ejercicio_ia(tema, nivel, edad, dificultades):
     prompt = f"""
 Eres un profesor de matemáticas para niños.
@@ -105,13 +89,9 @@ Nivel: {nivel}
 Dificultades del alumno:
 {dificultades}
 
-IMPORTANTE:
-- Devuelve SOLO un JSON válido
-- Incluye:
-  - ejercicio
-  - respuesta_correcta
-- Usa números simples
-- Lenguaje claro
+Devuelve SOLO JSON con:
+- ejercicio
+- respuesta_correcta
 """
 
     response = client.chat.completions.create(
@@ -137,26 +117,19 @@ IMPORTANTE:
 
 def generar_explicacion_ia(ejercicio, respuesta_alumno, respuesta_correcta, nivel):
     prompt = f"""
-Eres un profesor de matemáticas para niños.
+Eres un profesor para niños.
 
-Nivel del alumno: {nivel}
+Explica paso a paso:
 
-EJERCICIO:
-{ejercicio}
-
-RESPUESTA DEL ALUMNO:
-{respuesta_alumno}
-
-RESPUESTA CORRECTA:
-{respuesta_correcta}
-
-Explica paso a paso usando lenguaje claro para niños.
+Ejercicio: {ejercicio}
+Respuesta alumno: {respuesta_alumno}
+Correcta: {respuesta_correcta}
 """
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "Eres un tutor educativo experto."},
+            {"role": "system", "content": "Tutor experto."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.7
@@ -165,83 +138,61 @@ Explica paso a paso usando lenguaje claro para niños.
     return response.choices[0].message.content
 
 
+# =========================
+# ROOT
+# =========================
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
+
+
+# =========================
+# TUTOR
+# =========================
+
 @app.post("/tutor")
 def tutor(request: TutorRequest):
     db: Session = SessionLocal()
 
     try:
         alumno_id = request.alumno_id
-        respuesta_alumno = request.respuesta_alumno
-        nivel_inicial = request.nivel
-        tema = request.tema
 
-        if request.fecha_nacimiento is not None:
-            edad_alumno = calcular_edad(request.fecha_nacimiento)
-        elif request.edad is not None:
-            edad_alumno = request.edad
+        # Edad
+        if request.fecha_nacimiento:
+            edad = calcular_edad(request.fecha_nacimiento)
+        elif request.edad:
+            edad = request.edad
         else:
-            raise HTTPException(
-                status_code=400,
-                detail="Debes enviar fecha_nacimiento o edad."
-            )
+            raise HTTPException(400, "Falta edad")
 
-        if edad_alumno < 0 or edad_alumno > 120:
-            raise HTTPException(
-                status_code=400,
-                detail="La edad calculada no es válida."
-            )
-
+        # Alumno
         alumno = db.query(Alumno).filter_by(codigo=alumno_id).first()
 
-        if alumno:
-            alumno.edad = edad_alumno
-            if request.fecha_nacimiento is not None:
-                alumno.fecha_nacimiento = request.fecha_nacimiento
-        else:
+        if not alumno:
             alumno = Alumno(
                 codigo=alumno_id,
-                edad=edad_alumno,
+                edad=edad,
                 fecha_nacimiento=request.fecha_nacimiento
             )
             db.add(alumno)
             db.flush()
 
-        progreso = db.query(ProgresoTema).filter_by(
-            alumno_id=alumno_id,
-            tema=tema
-        ).first()
-
-        if progreso:
-            porcentaje_actual = progreso.porcentaje or 0
-            if porcentaje_actual >= 80:
-                nivel_detectado = "intermedio"
-            elif porcentaje_actual >= 50:
-                nivel_detectado = "básico"
-            else:
-                nivel_detectado = "refuerzo"
-        else:
-            nivel_detectado = nivel_inicial
-
-        if not respuesta_alumno:
-            ejercicio_data = generar_ejercicio_ia(
-                tema,
-                nivel_detectado,
-                edad_alumno,
+        # Generar ejercicio
+        if not request.respuesta_alumno:
+            data = generar_ejercicio_ia(
+                request.tema,
+                request.nivel,
+                edad,
                 request.dificultades
             )
-
-            ejercicio = ejercicio_data["ejercicio"]
-            respuesta_correcta = ejercicio_data["respuesta_correcta"]
 
             historial = HistorialInteraccion(
                 alumno_id=alumno_id,
                 mensaje_alumno=request.pregunta,
-                respuesta_ia=ejercicio,
-                tema=tema,
-                nivel_detectado=nivel_detectado,
-                ejercicio_generado=ejercicio,
-                respuesta_correcta=respuesta_correcta,
-                corregido=False
+                respuesta_ia=data["ejercicio"],
+                ejercicio_generado=data["ejercicio"],
+                respuesta_correcta=data["respuesta_correcta"]
             )
 
             db.add(historial)
@@ -250,127 +201,105 @@ def tutor(request: TutorRequest):
 
             return {
                 "historial_id": historial.id,
-                "ejercicio": ejercicio,
-                "explicacion": ejercicio,
-                "es_correcta": None,
-                "respuesta_correcta": None,
-                "porcentaje_progreso": progreso.porcentaje if progreso else 0,
-                "edad_calculada": edad_alumno
+                "ejercicio": data["ejercicio"],
+                "es_correcta": None
             }
 
-        if not request.historial_id:
-            raise HTTPException(status_code=400, detail="Falta historial_id")
-
-        ejercicio_actual = db.query(HistorialInteraccion).filter_by(
-            id=request.historial_id,
-            alumno_id=alumno_id
+        # Corregir
+        hist = db.query(HistorialInteraccion).filter_by(
+            id=request.historial_id
         ).first()
 
-        if not ejercicio_actual:
-            raise HTTPException(status_code=404, detail="Ejercicio no encontrado")
-
-        if ejercicio_actual.corregido:
-            raise HTTPException(status_code=400, detail="Ya corregido")
-
-        respuesta_correcta = ejercicio_actual.respuesta_correcta
-
-        es_correcta = (
-            normalizar_respuesta(respuesta_alumno)
-            == normalizar_respuesta(respuesta_correcta)
-        )
-
-        if progreso:
-            progreso.ejercicios_totales += 1
-            if es_correcta:
-                progreso.ejercicios_correctos += 1
-        else:
-            progreso = ProgresoTema(
-                alumno_id=alumno_id,
-                tema=tema,
-                ejercicios_totales=1,
-                ejercicios_correctos=1 if es_correcta else 0
-            )
-            db.add(progreso)
-
-        progreso.porcentaje = int(
-            (progreso.ejercicios_correctos / progreso.ejercicios_totales) * 100
-        )
+        correcta = normalizar_respuesta(request.respuesta_alumno) == \
+                   normalizar_respuesta(hist.respuesta_correcta)
 
         explicacion = generar_explicacion_ia(
-            ejercicio_actual.ejercicio_generado,
-            respuesta_alumno,
-            respuesta_correcta,
-            nivel_detectado
+            hist.ejercicio_generado,
+            request.respuesta_alumno,
+            hist.respuesta_correcta,
+            request.nivel
         )
 
-        ejercicio_actual.respuesta_alumno = respuesta_alumno
-        ejercicio_actual.respuesta_ia = explicacion
-        ejercicio_actual.corregido = True
+        hist.corregido = True
+        hist.respuesta_alumno = request.respuesta_alumno
+        hist.respuesta_ia = explicacion
 
         db.commit()
 
         return {
-            "historial_id": ejercicio_actual.id,
-            "es_correcta": es_correcta,
-            "explicacion": explicacion,
-            "respuesta_correcta": None if es_correcta else respuesta_correcta,
-            "porcentaje_progreso": progreso.porcentaje,
-            "edad_calculada": edad_alumno
+            "es_correcta": correcta,
+            "explicacion": explicacion
         }
 
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
 
-@app.get("/alumnos", response_model=List[AlumnoResponse])
+# =========================
+# ALUMNOS (CLAVE)
+# =========================
+
+@app.get("/alumnos")
 def listar_alumnos():
     db: Session = SessionLocal()
     try:
         alumnos = db.query(Alumno).order_by(Alumno.codigo.asc()).all()
-        return alumnos
+
+        return [
+            {
+                "codigo": a.codigo,
+                "nombre": a.nombre,
+                "edad": a.edad,
+                "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
+                "email": a.email,
+                "puntos_disponibles": a.puntos_disponibles or 0,
+                "puntos_ganados_total": a.puntos_ganados_total or 0,
+                "puntos_gastados_total": a.puntos_gastados_total or 0,
+            }
+            for a in alumnos
+        ]
     finally:
         db.close()
 
 
-@app.get("/alumnos/{codigo}", response_model=AlumnoResponse)
+@app.get("/alumnos/{codigo}")
 def obtener_alumno(codigo: str):
     db: Session = SessionLocal()
     try:
-        alumno = db.query(Alumno).filter_by(codigo=codigo).first()
+        a = db.query(Alumno).filter_by(codigo=codigo).first()
 
-        if not alumno:
-            raise HTTPException(status_code=404, detail="Alumno no encontrado")
+        if not a:
+            raise HTTPException(404, "No encontrado")
 
-        return alumno
+        return {
+            "codigo": a.codigo,
+            "nombre": a.nombre,
+            "edad": a.edad,
+            "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
+            "email": a.email,
+            "puntos_disponibles": a.puntos_disponibles or 0,
+            "puntos_ganados_total": a.puntos_ganados_total or 0,
+            "puntos_gastados_total": a.puntos_gastados_total or 0,
+        }
     finally:
         db.close()
 
 
-@app.post("/alumnos", response_model=AlumnoResponse)
+@app.post("/alumnos")
 def crear_alumno(request: AlumnoUpdate):
     db: Session = SessionLocal()
     try:
-        existente = db.query(Alumno).filter_by(codigo=request.codigo).first()
-        if existente:
-            raise HTTPException(
-                status_code=400,
-                detail="Ya existe un alumno con ese código"
-            )
+        if db.query(Alumno).filter_by(codigo=request.codigo).first():
+            raise HTTPException(400, "Ya existe")
 
-        edad_final = request.edad
-        if request.fecha_nacimiento is not None:
-            edad_final = calcular_edad(request.fecha_nacimiento)
+        edad = request.edad
+        if request.fecha_nacimiento:
+            edad = calcular_edad(request.fecha_nacimiento)
 
         alumno = Alumno(
             codigo=request.codigo,
             nombre=request.nombre,
-            edad=edad_final,
+            edad=edad,
             fecha_nacimiento=request.fecha_nacimiento,
             email=request.email,
             puntos_disponibles=request.puntos_disponibles,
@@ -382,39 +311,23 @@ def crear_alumno(request: AlumnoUpdate):
         db.commit()
         db.refresh(alumno)
 
-        return alumno
+        return {"ok": True}
 
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
 
-@app.put("/alumnos/{codigo}", response_model=AlumnoResponse)
+@app.put("/alumnos/{codigo}")
 def actualizar_alumno(codigo: str, request: AlumnoUpdate):
     db: Session = SessionLocal()
     try:
         alumno = db.query(Alumno).filter_by(codigo=codigo).first()
 
         if not alumno:
-            raise HTTPException(status_code=404, detail="Alumno no encontrado")
-
-        if request.codigo != codigo:
-            raise HTTPException(
-                status_code=400,
-                detail="El código del alumno en la URL y en el body no coincide"
-            )
-
-        edad_final = request.edad
-        if request.fecha_nacimiento is not None:
-            edad_final = calcular_edad(request.fecha_nacimiento)
+            raise HTTPException(404, "No existe")
 
         alumno.nombre = request.nombre
-        alumno.edad = edad_final
+        alumno.edad = request.edad
         alumno.fecha_nacimiento = request.fecha_nacimiento
         alumno.email = request.email
         alumno.puntos_disponibles = request.puntos_disponibles
@@ -422,15 +335,8 @@ def actualizar_alumno(codigo: str, request: AlumnoUpdate):
         alumno.puntos_gastados_total = request.puntos_gastados_total
 
         db.commit()
-        db.refresh(alumno)
 
-        return alumno
+        return {"ok": True}
 
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
