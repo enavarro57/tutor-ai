@@ -36,25 +36,15 @@ class Alumno(Base):
     __tablename__ = "alumnos"
 
     id = Column(Integer, primary_key=True, index=True)
-
-    # 🔥 CORREGIDO: ahora coincide con la BD
     codigo = Column(String(100), unique=True, nullable=False)
-
     nombre = Column(String(255))
     edad = Column(Integer)
     email = Column(String(150))
-    tfno_whats_tutor = Column(String(20))
-    email_tutor = Column(String(150))
-    fecha_alta = Column(Date)
-    datos_bancarios_cargo = Column(Text)
-
-    # 🔥 CORREGIDO: nombres reales de la BD
     puntos_disponibles = Column(Integer, default=0)
     puntos_ganados_total = Column(Integer, default=0)
     puntos_gastados_total = Column(Integer, default=0)
-
     fecha_nacimiento = Column(Date, nullable=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
+    created_at = Column(TIMESTAMP, server_default=func.now()))
 
 
 class Subgrupo(Base):
