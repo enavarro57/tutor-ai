@@ -303,21 +303,28 @@ def obtener_alumno(codigo: str):
 def crear_alumno(request: AlumnoUpdate):
     db: Session = SessionLocal()
     try:
-        codigo_generado = generar_codigo_alumno(db)
+        # 🔥 GENERAR CÓDIGO AUTOMÁTICO
+        ultimo = db.query(Alumno).order_by(Alumno.codigo.desc()).first()
 
+        if ultimo and ultimo.codigo.isdigit():
+            nuevo_codigo = str(int(ultimo.codigo) + 1)
+        else:
+            nuevo_codigo = "100000"
+
+        # Edad automática
         edad = request.edad
         if request.fecha_nacimiento:
             edad = calcular_edad(request.fecha_nacimiento)
 
         alumno = Alumno(
-            codigo=codigo_generado,
+            codigo=nuevo_codigo,
             nombre=request.nombre,
             edad=edad,
             fecha_nacimiento=request.fecha_nacimiento,
             email=request.email,
-            puntos_disponibles=0,
-            puntos_ganados_total=0,
-            puntos_gastados_total=0,
+            puntos_disponibles=request.puntos_disponibles,
+            puntos_ganados_total=request.puntos_ganados_total,
+            puntos_gastados_total=request.puntos_gastados_total,
         )
 
         db.add(alumno)
@@ -326,16 +333,12 @@ def crear_alumno(request: AlumnoUpdate):
 
         return {
             "ok": True,
-            "codigo": alumno.codigo,
-            "nombre": alumno.nombre,
-            "edad": alumno.edad,
-            "fecha_nacimiento": str(alumno.fecha_nacimiento) if alumno.fecha_nacimiento else None,
-            "email": alumno.email,
-            "puntos_disponibles": alumno.puntos_disponibles or 0,
-            "puntos_ganados_total": alumno.puntos_ganados_total or 0,
-            "puntos_gastados_total": alumno.puntos_gastados_total or 0,
+            "codigo": alumno.codigo
         }
 
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
