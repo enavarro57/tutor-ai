@@ -16,13 +16,8 @@ from openai import OpenAI
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-# =========================
-# SCHEMAS
-# =========================
 
 class TutorRequest(BaseModel):
     alumno_id: str
@@ -40,17 +35,22 @@ class TutorRequest(BaseModel):
 class AlumnoUpdate(BaseModel):
     codigo: Optional[str] = None
     nombre: Optional[str] = None
+    nivel_actual: Optional[str] = None
     edad: Optional[int] = None
     fecha_nacimiento: Optional[date] = None
+    tfno_whats: Optional[str] = None
     email: Optional[str] = None
+    nombre_tutor: Optional[str] = None
+    tfno_whats_tutor: Optional[str] = None
+    email_tutor: Optional[str] = None
+    fecha_alta: Optional[date] = None
+    datos_bancarios_cargo: Optional[str] = None
+    contrasena: Optional[str] = None
+    comentarios: Optional[str] = None
     puntos_disponibles: int = 0
     puntos_ganados_total: int = 0
     puntos_gastados_total: int = 0
 
-
-# =========================
-# UTILIDADES
-# =========================
 
 def calcular_edad(fecha_nacimiento: date) -> int:
     hoy = date.today()
@@ -76,6 +76,29 @@ def generar_codigo_alumno(db: Session) -> str:
         detail="No hay códigos disponibles de 6 dígitos."
     )
 
+
+def alumno_to_dict(a: Alumno):
+    return {
+        "codigo": a.codigo,
+        "nombre": a.nombre,
+        "nivel_actual": a.nivel_actual,
+        "edad": a.edad,
+        "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
+        "tfno_whats": a.tfno_whats,
+        "email": a.email,
+        "nombre_tutor": a.nombre_tutor,
+        "tfno_whats_tutor": a.tfno_whats_tutor,
+        "email_tutor": a.email_tutor,
+        "fecha_alta": str(a.fecha_alta) if a.fecha_alta else None,
+        "datos_bancarios_cargo": a.datos_bancarios_cargo,
+        "contrasena": a.contrasena,
+        "comentarios": a.comentarios,
+        "puntos_disponibles": a.puntos_disponibles or 0,
+        "puntos_ganados_total": a.puntos_ganados_total or 0,
+        "puntos_gastados_total": a.puntos_gastados_total or 0,
+    }
+
+
 def normalizar_respuesta(texto: str) -> str:
     if not texto:
         return ""
@@ -91,10 +114,6 @@ def normalizar_respuesta(texto: str) -> str:
 
     return texto
 
-
-# =========================
-# IA
-# =========================
 
 def generar_ejercicio_ia(tema, nivel, edad, dificultades):
     prompt = f"""
@@ -122,15 +141,15 @@ Devuelve SOLO JSON con:
     )
 
     texto = response.choices[0].message.content or ""
-
     match = re.search(r"\{.*\}", texto, re.DOTALL)
+
     if match:
         return json.loads(match.group())
-    else:
-        return {
-            "ejercicio": "¿Cuánto es 10 ÷ 2?",
-            "respuesta_correcta": "5"
-        }
+
+    return {
+        "ejercicio": "¿Cuánto es 10 ÷ 2?",
+        "respuesta_correcta": "5"
+    }
 
 
 def generar_explicacion_ia(ejercicio, respuesta_alumno, respuesta_correcta, nivel):
@@ -156,18 +175,10 @@ Correcta: {respuesta_correcta}
     return response.choices[0].message.content
 
 
-# =========================
-# ROOT
-# =========================
-
 @app.get("/")
 def root():
     return {"status": "ok"}
 
-
-# =========================
-# TUTOR
-# =========================
 
 @app.post("/tutor")
 def tutor(request: TutorRequest):
@@ -224,8 +235,7 @@ def tutor(request: TutorRequest):
             id=request.historial_id
         ).first()
 
-        correcta = normalizar_respuesta(request.respuesta_alumno) == \
-                   normalizar_respuesta(hist.respuesta_correcta)
+        correcta = normalizar_respuesta(request.respuesta_alumno) == normalizar_respuesta(hist.respuesta_correcta)
 
         explicacion = generar_explicacion_ia(
             hist.ejercicio_generado,
@@ -249,29 +259,12 @@ def tutor(request: TutorRequest):
         db.close()
 
 
-# =========================
-# ALUMNOS
-# =========================
-
 @app.get("/alumnos")
 def listar_alumnos():
     db: Session = SessionLocal()
     try:
         alumnos = db.query(Alumno).order_by(Alumno.codigo.asc()).all()
-
-        return [
-            {
-                "codigo": a.codigo,
-                "nombre": a.nombre,
-                "edad": a.edad,
-                "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
-                "email": a.email,
-                "puntos_disponibles": a.puntos_disponibles or 0,
-                "puntos_ganados_total": a.puntos_ganados_total or 0,
-                "puntos_gastados_total": a.puntos_gastados_total or 0,
-            }
-            for a in alumnos
-        ]
+        return [alumno_to_dict(a) for a in alumnos]
     finally:
         db.close()
 
@@ -280,21 +273,12 @@ def listar_alumnos():
 def obtener_alumno(codigo: str):
     db: Session = SessionLocal()
     try:
-        a = db.query(Alumno).filter_by(codigo=codigo).first()
+        alumno = db.query(Alumno).filter_by(codigo=codigo).first()
 
-        if not a:
-            raise HTTPException(404, "No encontrado")
+        if not alumno:
+            raise HTTPException(status_code=404, detail="Alumno no encontrado")
 
-        return {
-            "codigo": a.codigo,
-            "nombre": a.nombre,
-            "edad": a.edad,
-            "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
-            "email": a.email,
-            "puntos_disponibles": a.puntos_disponibles or 0,
-            "puntos_ganados_total": a.puntos_ganados_total or 0,
-            "puntos_gastados_total": a.puntos_gastados_total or 0,
-        }
+        return alumno_to_dict(alumno)
     finally:
         db.close()
 
@@ -303,15 +287,8 @@ def obtener_alumno(codigo: str):
 def crear_alumno(request: AlumnoUpdate):
     db: Session = SessionLocal()
     try:
-        # 🔥 GENERAR CÓDIGO AUTOMÁTICO
-        ultimo = db.query(Alumno).order_by(Alumno.codigo.desc()).first()
+        nuevo_codigo = generar_codigo_alumno(db)
 
-        if ultimo and ultimo.codigo.isdigit():
-            nuevo_codigo = str(int(ultimo.codigo) + 1)
-        else:
-            nuevo_codigo = "100000"
-
-        # Edad automática
         edad = request.edad
         if request.fecha_nacimiento:
             edad = calcular_edad(request.fecha_nacimiento)
@@ -319,12 +296,21 @@ def crear_alumno(request: AlumnoUpdate):
         alumno = Alumno(
             codigo=nuevo_codigo,
             nombre=request.nombre,
+            nivel_actual=request.nivel_actual,
             edad=edad,
             fecha_nacimiento=request.fecha_nacimiento,
+            tfno_whats=request.tfno_whats,
             email=request.email,
-            puntos_disponibles=request.puntos_disponibles,
-            puntos_ganados_total=request.puntos_ganados_total,
-            puntos_gastados_total=request.puntos_gastados_total,
+            nombre_tutor=request.nombre_tutor,
+            tfno_whats_tutor=request.tfno_whats_tutor,
+            email_tutor=request.email_tutor,
+            fecha_alta=request.fecha_alta or date.today(),
+            datos_bancarios_cargo=request.datos_bancarios_cargo,
+            contrasena=request.contrasena,
+            comentarios=request.comentarios,
+            puntos_disponibles=0,
+            puntos_ganados_total=0,
+            puntos_gastados_total=0,
         )
 
         db.add(alumno)
@@ -333,9 +319,13 @@ def crear_alumno(request: AlumnoUpdate):
 
         return {
             "ok": True,
-            "codigo": alumno.codigo
+            "codigo": alumno.codigo,
+            "alumno": alumno_to_dict(alumno)
         }
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -350,19 +340,69 @@ def actualizar_alumno(codigo: str, request: AlumnoUpdate):
         alumno = db.query(Alumno).filter_by(codigo=codigo).first()
 
         if not alumno:
-            raise HTTPException(404, "No existe")
+            raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+        edad = request.edad
+        if request.fecha_nacimiento:
+            edad = calcular_edad(request.fecha_nacimiento)
 
         alumno.nombre = request.nombre
-        alumno.edad = request.edad
+        alumno.nivel_actual = request.nivel_actual
+        alumno.edad = edad
         alumno.fecha_nacimiento = request.fecha_nacimiento
+        alumno.tfno_whats = request.tfno_whats
         alumno.email = request.email
+        alumno.nombre_tutor = request.nombre_tutor
+        alumno.tfno_whats_tutor = request.tfno_whats_tutor
+        alumno.email_tutor = request.email_tutor
+        alumno.fecha_alta = request.fecha_alta
+        alumno.datos_bancarios_cargo = request.datos_bancarios_cargo
+        alumno.contrasena = request.contrasena
+        alumno.comentarios = request.comentarios
         alumno.puntos_disponibles = request.puntos_disponibles
         alumno.puntos_ganados_total = request.puntos_ganados_total
         alumno.puntos_gastados_total = request.puntos_gastados_total
 
         db.commit()
+        db.refresh(alumno)
 
-        return {"ok": True}
+        return {
+            "ok": True,
+            "alumno": alumno_to_dict(alumno)
+        }
 
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.delete("/alumnos/{codigo}")
+def eliminar_alumno(codigo: str):
+    db: Session = SessionLocal()
+    try:
+        alumno = db.query(Alumno).filter_by(codigo=codigo).first()
+
+        if not alumno:
+            raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+        db.delete(alumno)
+        db.commit()
+
+        return {
+            "ok": True,
+            "mensaje": "Alumno eliminado correctamente"
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
