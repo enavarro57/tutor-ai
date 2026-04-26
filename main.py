@@ -60,21 +60,21 @@ def calcular_edad(fecha_nacimiento: date) -> int:
 
 
 def generar_codigo_alumno(db: Session) -> str:
-    alumnos = db.query(Alumno.codigo).all()
+    codigos_existentes = {
+        str(c[0])
+        for c in db.query(Alumno.codigo).all()
+        if c[0] and re.fullmatch(r"\d{6}", str(c[0]))
+    }
 
-    max_codigo = 0
+    for numero in range(100000, 1000000):
+        codigo = str(numero)
+        if codigo not in codigos_existentes:
+            return codigo
 
-    for alumno in alumnos:
-        codigo = alumno[0]
-
-        if codigo and re.fullmatch(r"\d{6}", str(codigo)):
-            numero = int(codigo)
-            if numero > max_codigo:
-                max_codigo = numero
-
-    siguiente = max_codigo + 1
-    return str(siguiente).zfill(6)
-
+    raise HTTPException(
+        status_code=400,
+        detail="No hay códigos disponibles de 6 dígitos."
+    )
 
 def normalizar_respuesta(texto: str) -> str:
     if not texto:
