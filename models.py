@@ -39,7 +39,7 @@ class Alumno(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # 👇 MAPEO CLAVE (NO TOCAR)
-    codigo = Column("alumno_id", String(100), unique=True, nullable=False)
+    codigo = Column(String(100), unique=True, nullable=False)
 
     nombre = Column(String(255))
     nivel_actual = Column(String(100))
