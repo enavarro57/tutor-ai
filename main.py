@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 from datetime import date
 import os
 import re
@@ -18,6 +18,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 # =========================
 # SCHEMAS
@@ -37,7 +38,7 @@ class TutorRequest(BaseModel):
 
 
 class AlumnoUpdate(BaseModel):
-    codigo: str
+    codigo: Optional[str] = None
     nombre: Optional[str] = None
     edad: Optional[int] = None
     fecha_nacimiento: Optional[date] = None
@@ -56,6 +57,23 @@ def calcular_edad(fecha_nacimiento: date) -> int:
     return hoy.year - fecha_nacimiento.year - (
         (hoy.month, hoy.day) < (fecha_nacimiento.month, fecha_nacimiento.day)
     )
+
+
+def generar_codigo_alumno(db: Session) -> str:
+    alumnos = db.query(Alumno.codigo).all()
+
+    max_codigo = 0
+
+    for alumno in alumnos:
+        codigo = alumno[0]
+
+        if codigo and re.fullmatch(r"\d{6}", str(codigo)):
+            numero = int(codigo)
+            if numero > max_codigo:
+                max_codigo = numero
+
+    siguiente = max_codigo + 1
+    return str(siguiente).zfill(6)
 
 
 def normalizar_respuesta(texto: str) -> str:
@@ -158,7 +176,6 @@ def tutor(request: TutorRequest):
     try:
         alumno_id = request.alumno_id
 
-        # Edad
         if request.fecha_nacimiento:
             edad = calcular_edad(request.fecha_nacimiento)
         elif request.edad:
@@ -166,7 +183,6 @@ def tutor(request: TutorRequest):
         else:
             raise HTTPException(400, "Falta edad")
 
-        # Alumno
         alumno = db.query(Alumno).filter_by(codigo=alumno_id).first()
 
         if not alumno:
@@ -178,7 +194,6 @@ def tutor(request: TutorRequest):
             db.add(alumno)
             db.flush()
 
-        # Generar ejercicio
         if not request.respuesta_alumno:
             data = generar_ejercicio_ia(
                 request.tema,
@@ -205,7 +220,6 @@ def tutor(request: TutorRequest):
                 "es_correcta": None
             }
 
-        # Corregir
         hist = db.query(HistorialInteraccion).filter_by(
             id=request.historial_id
         ).first()
@@ -236,7 +250,7 @@ def tutor(request: TutorRequest):
 
 
 # =========================
-# ALUMNOS (CLAVE)
+# ALUMNOS
 # =========================
 
 @app.get("/alumnos")
@@ -289,29 +303,38 @@ def obtener_alumno(codigo: str):
 def crear_alumno(request: AlumnoUpdate):
     db: Session = SessionLocal()
     try:
-        if db.query(Alumno).filter_by(codigo=request.codigo).first():
-            raise HTTPException(400, "Ya existe")
+        codigo_generado = generar_codigo_alumno(db)
 
         edad = request.edad
         if request.fecha_nacimiento:
             edad = calcular_edad(request.fecha_nacimiento)
 
         alumno = Alumno(
-            codigo=request.codigo,
+            codigo=codigo_generado,
             nombre=request.nombre,
             edad=edad,
             fecha_nacimiento=request.fecha_nacimiento,
             email=request.email,
-            puntos_disponibles=request.puntos_disponibles,
-            puntos_ganados_total=request.puntos_ganados_total,
-            puntos_gastados_total=request.puntos_gastados_total,
+            puntos_disponibles=0,
+            puntos_ganados_total=0,
+            puntos_gastados_total=0,
         )
 
         db.add(alumno)
         db.commit()
         db.refresh(alumno)
 
-        return {"ok": True}
+        return {
+            "ok": True,
+            "codigo": alumno.codigo,
+            "nombre": alumno.nombre,
+            "edad": alumno.edad,
+            "fecha_nacimiento": str(alumno.fecha_nacimiento) if alumno.fecha_nacimiento else None,
+            "email": alumno.email,
+            "puntos_disponibles": alumno.puntos_disponibles or 0,
+            "puntos_ganados_total": alumno.puntos_ganados_total or 0,
+            "puntos_gastados_total": alumno.puntos_gastados_total or 0,
+        }
 
     finally:
         db.close()
