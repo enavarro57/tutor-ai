@@ -23,9 +23,12 @@ class TutorRequest(BaseModel):
     alumno_id: str
     pregunta: str
     respuesta_alumno: Optional[str] = None
+
+    # Se mantiene edad/nivel porque el tutor IA los usa para generar ejercicios
     edad: Optional[int] = None
     nivel: str
     tema: str
+
     historial_id: Optional[int] = None
     historial: list = Field(default_factory=list)
     dificultades: list = Field(default_factory=list)
@@ -35,8 +38,11 @@ class TutorRequest(BaseModel):
 class AlumnoUpdate(BaseModel):
     codigo: Optional[str] = None
     nombre: Optional[str] = None
-    nivel_actual: Optional[str] = None
-    edad: Optional[int] = None
+
+    # Campos nuevos del formulario
+    apellidos: Optional[str] = None
+    estado: Optional[str] = None
+
     fecha_nacimiento: Optional[date] = None
     tfno_whats: Optional[str] = None
     email: Optional[str] = None
@@ -81,8 +87,8 @@ def alumno_to_dict(a: Alumno):
     return {
         "codigo": a.codigo,
         "nombre": a.nombre,
-        "nivel_actual": a.nivel_actual,
-        "edad": a.edad,
+        "apellidos": a.apellidos,
+        "estado": a.estado,
         "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
         "tfno_whats": a.tfno_whats,
         "email": a.email,
@@ -199,7 +205,6 @@ def tutor(request: TutorRequest):
         if not alumno:
             alumno = Alumno(
                 codigo=alumno_id,
-                edad=edad,
                 fecha_nacimiento=request.fecha_nacimiento
             )
             db.add(alumno)
@@ -234,6 +239,9 @@ def tutor(request: TutorRequest):
         hist = db.query(HistorialInteraccion).filter_by(
             id=request.historial_id
         ).first()
+
+        if not hist:
+            raise HTTPException(status_code=404, detail="Historial no encontrado")
 
         correcta = normalizar_respuesta(request.respuesta_alumno) == normalizar_respuesta(hist.respuesta_correcta)
 
@@ -289,15 +297,11 @@ def crear_alumno(request: AlumnoUpdate):
     try:
         nuevo_codigo = generar_codigo_alumno(db)
 
-        edad = request.edad
-        if request.fecha_nacimiento:
-            edad = calcular_edad(request.fecha_nacimiento)
-
         alumno = Alumno(
             codigo=nuevo_codigo,
             nombre=request.nombre,
-            nivel_actual=request.nivel_actual,
-            edad=edad,
+            apellidos=request.apellidos,
+            estado=request.estado,
             fecha_nacimiento=request.fecha_nacimiento,
             tfno_whats=request.tfno_whats,
             email=request.email,
@@ -342,13 +346,9 @@ def actualizar_alumno(codigo: str, request: AlumnoUpdate):
         if not alumno:
             raise HTTPException(status_code=404, detail="Alumno no encontrado")
 
-        edad = request.edad
-        if request.fecha_nacimiento:
-            edad = calcular_edad(request.fecha_nacimiento)
-
         alumno.nombre = request.nombre
-        alumno.nivel_actual = request.nivel_actual
-        alumno.edad = edad
+        alumno.apellidos = request.apellidos
+        alumno.estado = request.estado
         alumno.fecha_nacimiento = request.fecha_nacimiento
         alumno.tfno_whats = request.tfno_whats
         alumno.email = request.email

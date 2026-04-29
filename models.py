@@ -42,8 +42,8 @@ class Alumno(Base):
     codigo = Column(String(100), unique=True, nullable=False)
 
     nombre = Column(String(255))
-    nivel_actual = Column(String(100))
-    edad = Column(Integer)
+    apellidos = Column(String(100))
+    estado = Column(String(100))
 
     tfno_whats = Column(String(20))
     email = Column(String(150))
