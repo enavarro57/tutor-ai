@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import date
+from fractions import Fraction
 import os
 import re
 import json
@@ -23,12 +24,9 @@ class TutorRequest(BaseModel):
     alumno_id: str
     pregunta: str
     respuesta_alumno: Optional[str] = None
-
-    # Se mantiene edad/nivel porque el tutor IA los usa para generar ejercicios
     edad: Optional[int] = None
     nivel: str
     tema: str
-
     historial_id: Optional[int] = None
     historial: list = Field(default_factory=list)
     dificultades: list = Field(default_factory=list)
@@ -37,12 +35,10 @@ class TutorRequest(BaseModel):
 
 class AlumnoUpdate(BaseModel):
     codigo: Optional[str] = None
+    wp_user_id: Optional[int] = None
     nombre: Optional[str] = None
-
-    # Campos nuevos del formulario
     apellidos: Optional[str] = None
     estado: Optional[str] = None
-
     fecha_nacimiento: Optional[date] = None
     tfno_whats: Optional[str] = None
     email: Optional[str] = None
@@ -86,39 +82,58 @@ def generar_codigo_alumno(db: Session) -> str:
 def alumno_to_dict(a: Alumno):
     return {
         "codigo": a.codigo,
+        "wp_user_id": getattr(a, "wp_user_id", None),
         "nombre": a.nombre,
-        "apellidos": a.apellidos,
-        "estado": a.estado,
+        "apellidos": getattr(a, "apellidos", None),
+        "estado": getattr(a, "estado", None),
+        "edad": getattr(a, "edad", None),
         "fecha_nacimiento": str(a.fecha_nacimiento) if a.fecha_nacimiento else None,
-        "tfno_whats": a.tfno_whats,
+        "tfno_whats": getattr(a, "tfno_whats", None),
         "email": a.email,
-        "nombre_tutor": a.nombre_tutor,
-        "tfno_whats_tutor": a.tfno_whats_tutor,
-        "email_tutor": a.email_tutor,
-        "fecha_alta": str(a.fecha_alta) if a.fecha_alta else None,
-        "datos_bancarios_cargo": a.datos_bancarios_cargo,
-        "contrasena": a.contrasena,
-        "comentarios": a.comentarios,
+        "nombre_tutor": getattr(a, "nombre_tutor", None),
+        "tfno_whats_tutor": getattr(a, "tfno_whats_tutor", None),
+        "email_tutor": getattr(a, "email_tutor", None),
+        "fecha_alta": str(a.fecha_alta) if getattr(a, "fecha_alta", None) else None,
+        "datos_bancarios_cargo": getattr(a, "datos_bancarios_cargo", None),
+        "contrasena": getattr(a, "contrasena", None),
+        "comentarios": getattr(a, "comentarios", None),
         "puntos_disponibles": a.puntos_disponibles or 0,
         "puntos_ganados_total": a.puntos_ganados_total or 0,
         "puntos_gastados_total": a.puntos_gastados_total or 0,
     }
 
 
-def normalizar_respuesta(texto: str) -> str:
+def normalizar_respuesta(texto: str):
     if not texto:
-        return ""
+        return None
 
-    texto = texto.strip().lower().replace(",", ".").replace(" ", "")
+    texto = texto.strip().lower().replace(",", ".")
 
-    if "/" in texto:
+    fraccion = re.search(r"(\d+)\s*/\s*(\d+)", texto)
+    if fraccion:
         try:
-            num, den = texto.split("/")
-            return str(float(num) / float(den))
+            return float(Fraction(int(fraccion.group(1)), int(fraccion.group(2))))
         except Exception:
             return texto
 
-    return texto
+    numero = re.search(r"\d+(\.\d+)?", texto)
+    if numero:
+        try:
+            return float(numero.group())
+        except Exception:
+            return texto
+
+    return texto.replace(" ", "")
+
+
+def comparar_respuestas(respuesta_alumno: str, respuesta_correcta: str) -> bool:
+    r1 = normalizar_respuesta(respuesta_alumno)
+    r2 = normalizar_respuesta(respuesta_correcta)
+
+    if isinstance(r1, float) and isinstance(r2, float):
+        return abs(r1 - r2) < 0.0001
+
+    return r1 == r2
 
 
 def generar_ejercicio_ia(tema, nivel, edad, dificultades):
@@ -132,9 +147,13 @@ Nivel: {nivel}
 Dificultades del alumno:
 {dificultades}
 
-Devuelve SOLO JSON con:
-- ejercicio
-- respuesta_correcta
+IMPORTANTE:
+- Devuelve SOLO JSON válido
+- Incluye:
+  - ejercicio
+  - respuesta_correcta
+- respuesta_correcta debe ser SOLO el resultado final, sin explicación
+- Si es fracción, usa formato como "3/8"
 """
 
     response = client.chat.completions.create(
@@ -167,6 +186,7 @@ Explica paso a paso:
 Ejercicio: {ejercicio}
 Respuesta alumno: {respuesta_alumno}
 Correcta: {respuesta_correcta}
+Nivel: {nivel}
 """
 
     response = client.chat.completions.create(
@@ -198,7 +218,7 @@ def tutor(request: TutorRequest):
         elif request.edad:
             edad = request.edad
         else:
-            raise HTTPException(400, "Falta edad")
+            raise HTTPException(status_code=400, detail="Falta edad")
 
         alumno = db.query(Alumno).filter_by(codigo=alumno_id).first()
 
@@ -236,14 +256,21 @@ def tutor(request: TutorRequest):
                 "es_correcta": None
             }
 
+        if not request.historial_id:
+            raise HTTPException(status_code=400, detail="Falta historial_id")
+
         hist = db.query(HistorialInteraccion).filter_by(
-            id=request.historial_id
+            id=request.historial_id,
+            alumno_id=alumno_id
         ).first()
 
         if not hist:
             raise HTTPException(status_code=404, detail="Historial no encontrado")
 
-        correcta = normalizar_respuesta(request.respuesta_alumno) == normalizar_respuesta(hist.respuesta_correcta)
+        correcta = comparar_respuestas(
+            request.respuesta_alumno,
+            hist.respuesta_correcta
+        )
 
         explicacion = generar_explicacion_ia(
             hist.ejercicio_generado,
@@ -260,9 +287,16 @@ def tutor(request: TutorRequest):
 
         return {
             "es_correcta": correcta,
-            "explicacion": explicacion
+            "explicacion": explicacion,
+            "respuesta_correcta": None if correcta else hist.respuesta_correcta
         }
 
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
@@ -273,6 +307,21 @@ def listar_alumnos():
     try:
         alumnos = db.query(Alumno).order_by(Alumno.codigo.asc()).all()
         return [alumno_to_dict(a) for a in alumnos]
+    finally:
+        db.close()
+
+
+@app.get("/alumnos/by-wp-user/{wp_user_id}")
+def obtener_alumno_por_wp_user(wp_user_id: int):
+    db: Session = SessionLocal()
+    try:
+        alumno = db.query(Alumno).filter_by(wp_user_id=wp_user_id).first()
+
+        if not alumno:
+            raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+        return alumno_to_dict(alumno)
+
     finally:
         db.close()
 
@@ -299,6 +348,7 @@ def crear_alumno(request: AlumnoUpdate):
 
         alumno = Alumno(
             codigo=nuevo_codigo,
+            wp_user_id=request.wp_user_id,
             nombre=request.nombre,
             apellidos=request.apellidos,
             estado=request.estado,
@@ -346,6 +396,7 @@ def actualizar_alumno(codigo: str, request: AlumnoUpdate):
         if not alumno:
             raise HTTPException(status_code=404, detail="Alumno no encontrado")
 
+        alumno.wp_user_id = request.wp_user_id
         alumno.nombre = request.nombre
         alumno.apellidos = request.apellidos
         alumno.estado = request.estado
@@ -405,17 +456,4 @@ def eliminar_alumno(codigo: str):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-
-@app.get("/alumnos/by-wp-user/{wp_user_id}", response_model=AlumnoResponse)
-def obtener_alumno_por_wp_user(wp_user_id: int):
-    db: Session = SessionLocal()
-    try:
-        alumno = db.query(Alumno).filter_by(wp_user_id=wp_user_id).first()
-
-        if not alumno:
-            raise HTTPException(status_code=404, detail="Alumno no encontrado")
-
-        return alumno
-
-    finally:
-        db.close()  
+        db.close()
