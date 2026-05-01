@@ -41,6 +41,8 @@ class Alumno(Base):
     # 👇 MAPEO CLAVE (NO TOCAR)
     codigo = Column(String(100), unique=True, nullable=False)
 
+    wp_user_id = Column(Integer, nullable=True)  # 👈 AÑADIR ESTO
+
     nombre = Column(String(255))
     apellidos = Column(String(100))
     estado = Column(String(100))
