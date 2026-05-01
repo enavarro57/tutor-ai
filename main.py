@@ -405,4 +405,17 @@ def eliminar_alumno(codigo: str):
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        db.close()
+
+@app.get("/alumnos/by-wp-user/{wp_user_id}", response_model=AlumnoResponse)
+def obtener_alumno_por_wp_user(wp_user_id: int):
+    db: Session = SessionLocal()
+    try:
+        alumno = db.query(Alumno).filter_by(wp_user_id=wp_user_id).first()
+
+        if not alumno:
+            raise HTTPException(status_code=404, detail="Alumno no encontrado")
+
+        return alumno
+
+    finally:
+        db.close()  
