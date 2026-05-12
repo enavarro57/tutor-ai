@@ -127,3 +127,11 @@ class EjercicioSesion(Base):
     puntos_obtenidos = Column(Integer, default=0)
     corregido = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
+
+
+class Reto(Base):
+    __tablename__ = "retos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String(100), unique=True, nullable=False)
+    descripcion = Column(String(255))
