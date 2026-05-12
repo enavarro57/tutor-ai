@@ -128,26 +128,9 @@ class EjercicioSesion(Base):
     corregido = Column(Boolean, default=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-
-=======
->>>>>>> f7fdee6 (CRUD real de retos)
-class Reto(Base):
-    __tablename__ = "retos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    codigo = Column(String(100), unique=True, nullable=False)
-<<<<<<< HEAD
-    descripcion = Column(String(255))
-=======
-    descripcion = Column(String(255))
->>>>>>> f7fdee6 (CRUD real de retos)
-=======
 
 class Reto(Base):
     __tablename__ = "retos"
 
     codigo = Column(String(100), primary_key=True)
     descripcion = Column(String(255))
->>>>>>> 145cb26 (Corregir modelo Reto)
