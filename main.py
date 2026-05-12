@@ -1,3 +1,4 @@
+from ai_tutor_crud import router as crud_router
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -17,6 +18,7 @@ from openai import OpenAI
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+app.include_router(crud_router)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
