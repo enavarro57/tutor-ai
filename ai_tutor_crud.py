@@ -24,9 +24,30 @@ def reto_to_dict(r: Reto):
 @router.get("/retos")
 def listar_retos():
     db: Session = SessionLocal()
+
     try:
         retos = db.query(Reto).order_by(Reto.codigo.asc()).all()
         return [reto_to_dict(r) for r in retos]
+
+    finally:
+        db.close()
+
+
+@router.get("/retos/{codigo}")
+def obtener_reto(codigo: str):
+    db: Session = SessionLocal()
+
+    try:
+        reto = db.query(Reto).filter_by(codigo=codigo).first()
+
+        if not reto:
+            raise HTTPException(
+                status_code=404,
+                detail="Reto no encontrado"
+            )
+
+        return reto_to_dict(reto)
+
     finally:
         db.close()
 
@@ -34,8 +55,10 @@ def listar_retos():
 @router.post("/retos")
 def crear_reto(request: RetoRequest):
     db: Session = SessionLocal()
+
     try:
         existe = db.query(Reto).filter_by(codigo=request.codigo).first()
+
         if existe:
             raise HTTPException(
                 status_code=400,
@@ -59,9 +82,11 @@ def crear_reto(request: RetoRequest):
     except HTTPException:
         db.rollback()
         raise
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         db.close()
 
@@ -69,10 +94,15 @@ def crear_reto(request: RetoRequest):
 @router.put("/retos/{codigo}")
 def actualizar_reto(codigo: str, request: RetoRequest):
     db: Session = SessionLocal()
+
     try:
         reto = db.query(Reto).filter_by(codigo=codigo).first()
+
         if not reto:
-            raise HTTPException(status_code=404, detail="Reto no encontrado")
+            raise HTTPException(
+                status_code=404,
+                detail="Reto no encontrado"
+            )
 
         reto.codigo = request.codigo
         reto.descripcion = request.descripcion
@@ -88,9 +118,11 @@ def actualizar_reto(codigo: str, request: RetoRequest):
     except HTTPException:
         db.rollback()
         raise
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         db.close()
 
@@ -98,10 +130,15 @@ def actualizar_reto(codigo: str, request: RetoRequest):
 @router.delete("/retos/{codigo}")
 def eliminar_reto(codigo: str):
     db: Session = SessionLocal()
+
     try:
         reto = db.query(Reto).filter_by(codigo=codigo).first()
+
         if not reto:
-            raise HTTPException(status_code=404, detail="Reto no encontrado")
+            raise HTTPException(
+                status_code=404,
+                detail="Reto no encontrado"
+            )
 
         db.delete(reto)
         db.commit()
@@ -114,8 +151,10 @@ def eliminar_reto(codigo: str):
     except HTTPException:
         db.rollback()
         raise
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         db.close()
