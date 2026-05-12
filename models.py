@@ -129,6 +129,7 @@ class EjercicioSesion(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
 >>>>>>> f7fdee6 (CRUD real de retos)
@@ -142,3 +143,11 @@ class Reto(Base):
 =======
     descripcion = Column(String(255))
 >>>>>>> f7fdee6 (CRUD real de retos)
+=======
+
+class Reto(Base):
+    __tablename__ = "retos"
+
+    codigo = Column(String(100), primary_key=True)
+    descripcion = Column(String(255))
+>>>>>>> 145cb26 (Corregir modelo Reto)
