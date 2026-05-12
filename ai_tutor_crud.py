@@ -16,7 +16,6 @@ class RetoRequest(BaseModel):
 
 def reto_to_dict(r: Reto):
     return {
-        "id": r.id,
         "codigo": r.codigo,
         "descripcion": r.descripcion,
     }
@@ -38,7 +37,10 @@ def crear_reto(request: RetoRequest):
     try:
         existe = db.query(Reto).filter_by(codigo=request.codigo).first()
         if existe:
-            raise HTTPException(status_code=400, detail="Ya existe un reto con ese código")
+            raise HTTPException(
+                status_code=400,
+                detail="Ya existe un reto con ese código"
+            )
 
         reto = Reto(
             codigo=request.codigo,
